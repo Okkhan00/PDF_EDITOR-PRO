@@ -1,0 +1,21 @@
+{
+	"appId": "com.aizaz.pdfeditpro",
+	"appName": "PdfEdit Pro",
+	"webDir": "www",
+	"android": {
+		"adjustMarginsForEdgeToEdge": "auto",
+		"allowMixedContent": false
+	},
+	"server": {
+		"androidScheme": "https"
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 700,
+			"launchAutoHide": true,
+			"backgroundColor": "#f4f1ec",
+			"showSpinner": false,
+			"androidScaleType": "CENTER_INSIDE"
+		}
+	}
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PdfEdit Pro</string>
+    <string name="title_activity_main">PdfEdit Pro</string>
+    <string name="package_name">com.aizaz.pdfeditpro</string>
+    <string name="custom_url_scheme">com.aizaz.pdfeditpro</string>
+</resources>
