@@ -1,46 +1,195 @@
-# PdfEdit Pro — Android (Capacitor)
+# PDF EDIT PRO
 
-PdfEdit Pro V1.3 wrapped, unchanged, as an offline Android app.
-`www/index.html` is the original editor; the only edits are:
+A modern Android PDF editor built with Capacitor, designed for practical PDF viewing, editing, annotation, export, and printing.
 
-| Change | Why |
-|---|---|
-| CDN `<script>`/font links → `vendor/...` | Works offline |
-| `pdfjsLib.GlobalWorkerOptions.workerSrc` → local worker | Offline PDF rendering |
-| `Tesseract.recognize(..., {workerPath, corePath, langPath})` | Offline OCR (English) |
-| `<script src="android-bridge.js">` added at the end | Native share/save, Back button, print fallback |
+**Powered by AZI CREATIONS**
 
-`www/android-bridge.js` does nothing in a normal browser.
+## 🚀 Download Latest Android APK
 
-## Get the APK (no Android Studio needed)
-1. Push this folder to a GitHub repo (branch `main`).
-2. **Actions → Android APK Build** runs automatically (or press *Run workflow*).
-3. Download **PdfEdit-Pro-Android-APK** from the run's *Artifacts* → unzip → `app-debug.apk` → install.
+**Direct latest APK download:**
 
-Tick *create_release* when running manually to also publish a GitHub Release.
+https://github.com/Okkhan00/PDF_EDITOR-PRO/releases/latest/download/app-debug.apk
 
-## Local commands
+**Latest Releases:**
+
+https://github.com/Okkhan00/PDF_EDITOR-PRO/releases/latest
+
+> The direct download always points to the APK attached to the latest GitHub Release. No need to search through old releases.
+
+## ✨ Features
+
+- 📄 Open and view PDF files
+- ✏️ Edit PDF text
+- 🔎 Find & Replace
+- 🖼️ Add and edit images
+- ✍️ Draw and upload signatures
+- 💾 Save reusable signatures
+- 💧 Add watermarks
+- ✂️ Crop and rotate pages
+- 📑 Organize PDF pages
+- 🔀 Merge PDF files
+- ✂️ Split and extract pages
+- 🔍 OCR support
+- 🖨️ Print PDF documents
+- 📤 Export PDF
+- 🖼️ Export pages as PNG
+- 📦 Export as ZIP
+- ↩️ Undo / Redo
+- 🌙 Dark mode
+- 💾 Draft autosave
+- 🏠 Home screen
+- 🕘 Recent Files
+- 📱 Android touch-friendly workflow
+- 🔍 Mobile pinch zoom and panning
+- 🎯 Accurate watermark/image/signature export positioning
+
+## 📱 Android
+
+The Android application is built with:
+
+- Capacitor
+- Android
+- Java / Gradle
+- GitHub Actions
+
+The web editor is packaged into a native Android application without requiring Android Studio for the normal GitHub Actions build workflow.
+
+## 🛠️ Build Locally
+
+Install dependencies:
+
 ```bash
-npm install
-npm run build            # copies libs/fonts/OCR data into www/vendor
-npx cap sync android
-cd android && ./gradlew assembleDebug
+npm ci
 ```
-Requires Node 20+, JDK 21. Output: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-## Signed release (optional, later)
-Add repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
-`ANDROID_KEY_PASSWORD`, then run the workflow manually with *build_signed_release* ticked.
+Build the web application:
 
-## Behaviour on Android
-- **Export/Download** (PDF, PNG, ZIP, split/extract/merge): file is written to app cache and the Android share sheet opens (Files, Drive, WhatsApp, Gmail…). Several files produced at once share one sheet.
-- **Print**: `window.print()` doesn't exist in WebView, so Print exports the PDF to the share sheet instead (choose a print service from there). Print page-range/copies options are ignored.
-- **Back button**: closes modal → advanced popover → tools sheet → sidebar drawer → search bar → crop mode; with a PDF open, needs a second press within 2 s to exit. Exports in progress can't be dismissed.
-- **OCR**: English only (bundled). Other languages would need extra `.traineddata.gz` files in `www/vendor/tesseract/lang/`.
-- **Fonts**: Latin subset of Inter, Roboto, Open Sans, Lato, Poppins, Montserrat.
+```bash
+npm run build
+```
 
-## Regenerating icons/splash
-`python3 scripts/make-assets.py` (needs Pillow).
+Sync Capacitor:
 
-## Privacy
-No backend, analytics, ads or network calls. The `INTERNET` permission is Capacitor's default and is only used for the local `https://localhost` WebView origin.
+```bash
+npx cap sync android
+```
+
+Build the Android debug APK:
+
+```bash
+cd android
+./gradlew assembleDebug
+```
+
+APK output:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+## 🤖 GitHub Actions
+
+The repository automatically builds the Android APK when changes are pushed to the `main` branch.
+
+The workflow:
+
+1. Checks out the repository
+2. Installs Node.js
+3. Installs Java 21
+4. Verifies and installs Android SDK packages
+5. Installs npm dependencies
+6. Builds the web application
+7. Syncs Capacitor
+8. Builds the Android debug APK
+9. Uploads the APK as a GitHub Actions artifact
+10. Creates a GitHub Release
+11. Attaches the APK to the Release
+
+A manual build can also be started from:
+
+**GitHub → Actions → Android APK Build → Run workflow**
+
+## 📥 Direct APK URL
+
+The stable latest-download URL is:
+
+```text
+https://github.com/Okkhan00/PDF_EDITOR-PRO/releases/latest/download/app-debug.apk
+```
+
+This URL is intentionally independent of the version number. When a new GitHub Release becomes the latest release, the same URL automatically points to the newest APK.
+
+## 🔐 Signed Release APK
+
+The workflow also supports an optional signed release build.
+
+Signed builds require these GitHub Actions secrets:
+
+```text
+ANDROID_KEYSTORE_BASE64
+ANDROID_KEYSTORE_PASSWORD
+ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD
+```
+
+When the signing secrets are configured, the manual workflow can build the signed release APK.
+
+## 🧪 Quality Checks
+
+The project includes tests for important PDF coordinate and export behavior, including:
+
+- PDF coordinate conversion
+- Watermark export positioning
+- Image/signature export positioning
+- Zoom and pan behavior
+
+The goal is to keep editor coordinates stable while the user zooms, pans, edits, and exports documents.
+
+## 📂 Project Structure
+
+```text
+PDF_EDITOR-PRO/
+├── android/                  # Capacitor Android project
+├── www/                      # PDF editor web application
+├── tests/                    # PDF/editor tests
+├── scripts/                  # Project scripts
+├── .github/
+│   └── workflows/
+│       └── Android.yml       # Android APK build + release workflow
+├── package.json
+└── capacitor.config.ts
+```
+
+## 🔄 Release Flow
+
+```text
+Push to main
+     ↓
+GitHub Actions
+     ↓
+Build Web App
+     ↓
+Capacitor Sync
+     ↓
+Build Android APK
+     ↓
+Create GitHub Release
+     ↓
+Upload app-debug.apk
+     ↓
+Latest APK URL updated automatically
+```
+
+## ⚠️ Notes
+
+- The direct latest APK link points to the debug APK produced by the automatic workflow.
+- A signed release APK requires the Android keystore secrets described above.
+- Do not commit private keystores, passwords, or signing credentials to the repository.
+- Keep existing working editor functionality intact when making future changes.
+- Test PDF editing, export, printing, zoom/pan, and Android behavior after major changes.
+
+## 👨‍💻 Project
+
+**PDF EDIT PRO**
+
+**Powered by AZI CREATIONS**
