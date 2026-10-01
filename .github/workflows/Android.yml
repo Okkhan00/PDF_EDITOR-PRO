@@ -1,22 +1,20 @@
-
 name: Android APK Build
 
 on:
+  push:
+    branches:
+      - main
+
   workflow_dispatch:
     inputs:
       create_release:
         description: "Also publish the APK as a GitHub Release"
         type: boolean
         default: true
-
       build_signed_release:
         description: "Also build a signed release APK (needs ANDROID_KEYSTORE_* secrets)"
         type: boolean
         default: false
-
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -37,17 +35,8 @@ jobs:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
 
     steps:
-
-      # ==================================================
-      # 1. CHECKOUT
-      # ==================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # ==================================================
-      # 2. NODE.JS
-      # ==================================================
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -55,102 +44,52 @@ jobs:
           node-version: 20
           cache: npm
 
-      # ==================================================
-      # 3. JAVA 21
-      # ==================================================
-
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      # ==================================================
-      # 4. VERIFY ANDROID SDK
-      # ==================================================
-
       - name: Verify Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          echo ""
-          echo "Android SDK:"
-          ls -la "$ANDROID_HOME"
-
-          echo ""
-          echo "SDK Manager:"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version || true
-
-      # ==================================================
-      # 5. ACCEPT LICENSES
-      # ==================================================
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
 
       - name: Accept Android SDK licenses
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
-      # ==================================================
-      # 6. INSTALL REQUIRED SDK PACKAGES
-      # ==================================================
-
       - name: Install Android SDK packages
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
           "$SDKMANAGER" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # ==================================================
-      # 7. VERIFY INSTALLED SDK
-      # ==================================================
-
-      - name: Verify Android SDK packages
+      - name: Verify installed SDK
         run: |
           echo "Installed Android platforms:"
-          ls -la "$ANDROID_HOME/platforms" || true
+          ls -la "$ANDROID_HOME/platforms"
 
-          echo ""
           echo "Installed Build Tools:"
-          ls -la "$ANDROID_HOME/build-tools" || true
+          ls -la "$ANDROID_HOME/build-tools"
 
-          echo ""
           echo "ADB:"
-          "$ANDROID_HOME/platform-tools/adb" version || true
-
-      # ==================================================
-      # 8. GRADLE
-      # ==================================================
+          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # ==================================================
-      # 9. NPM DEPENDENCIES
-      # ==================================================
-
       - name: Install npm dependencies
         run: npm ci
-
-      # ==================================================
-      # 10. BUILD WEB APP
-      # ==================================================
 
       - name: Build web assets
         run: npm run build
 
-      # ==================================================
-      # 11. CAPACITOR SYNC
-      # ==================================================
-
       - name: Sync Capacitor Android
         run: npx cap sync android
-
-      # ==================================================
-      # 12. BUILD DEBUG APK
-      # ==================================================
 
       - name: Build Debug APK
         working-directory: android
@@ -158,29 +97,17 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      # ==================================================
-      # 13. UPLOAD DEBUG APK
-      # ==================================================
-
-      - name: Upload Debug APK
+      - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: PdfEdit-Pro-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      # ==================================================
-      # 14. DECODE KEYSTORE
-      # ==================================================
-
       - name: Decode Android Keystore
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_signed_release && env.HAS_KEYSTORE == 'true' }}
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
-
-      # ==================================================
-      # 15. BUILD SIGNED RELEASE
-      # ==================================================
 
       - name: Build Signed Release APK
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_signed_release && env.HAS_KEYSTORE == 'true' }}
@@ -193,11 +120,7 @@ jobs:
         run: |
           ./gradlew assembleRelease --no-daemon --stacktrace
 
-      # ==================================================
-      # 16. UPLOAD SIGNED RELEASE
-      # ==================================================
-
-      - name: Upload Signed Release APK
+      - name: Upload Signed Release APK artifact
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_signed_release && env.HAS_KEYSTORE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
@@ -205,55 +128,46 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
-      # ==================================================
-      # 17. CREATE GITHUB RELEASE
-      # ==================================================
-
+      # Automatic release:
+      # - Every push to main creates a new GitHub Release.
+      # - Manual workflow can disable release creation.
       - name: Publish GitHub Release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.create_release }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.3.0-build${{ github.run_number }}
           name: PdfEdit Pro Android v1.3.0 - Build ${{ github.run_number }}
           generate_release_notes: true
-
           files: |
             android/app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
+
+      - name: Upload Signed APK to GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.create_release && inputs.build_signed_release && env.HAS_KEYSTORE == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.3.0-build${{ github.run_number }}
+          files: |
             android/app/build/outputs/apk/release/app-release.apk
-
-          fail_on_unmatched_files: false
-
-      # ==================================================
-      # 18. SHOW DIRECT LINKS
-      # ==================================================
+          fail_on_unmatched_files: true
 
       - name: Show Release Links
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.create_release }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
         run: |
           echo ""
           echo "=============================================="
           echo "       PDFEDIT PRO ANDROID RELEASE"
           echo "=============================================="
           echo ""
-
           echo "Latest Release:"
           echo "https://github.com/${{ github.repository }}/releases/latest"
-
           echo ""
-
-          echo "Release Page:"
+          echo "Latest APK Direct Download:"
+          echo "https://github.com/${{ github.repository }}/releases/latest/download/app-debug.apk"
+          echo ""
+          echo "This URL automatically points to the newest GitHub Release APK."
+          echo ""
+          echo "Current Release:"
           echo "https://github.com/${{ github.repository }}/releases/tag/v1.3.0-build${{ github.run_number }}"
-
-          echo ""
-
-          echo "Debug APK:"
-          echo "https://github.com/${{ github.repository }}/releases/download/v1.3.0-build${{ github.run_number }}/app-debug.apk"
-
-          echo ""
-
-          echo "Release APK:"
-          echo "https://github.com/${{ github.repository }}/releases/download/v1.3.0-build${{ github.run_number }}/app-release.apk"
-
           echo ""
           echo "=============================================="
-
