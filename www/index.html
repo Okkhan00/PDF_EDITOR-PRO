@@ -8,6 +8,7 @@
 <script src="vendor/pdf-lib/pdf-lib.min.js"></script>
 <script src="vendor/jszip/jszip.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
+<script src="pdf-coords.js"></script>
 <!-- FEATURE 3: web fonts used by FONT_CONFIG entries flagged webFont:true.
      Fails soft — if blocked/offline, those entries just fall back to their
      CSS fallback stack (Arial etc.) instead of breaking anything. -->
@@ -200,12 +201,17 @@ main{flex:1;display:flex;overflow:hidden;position:relative;}
   flex:1;
   overflow:auto;
   display:flex;
-  justify-content:center;
+  /* NOT justify-content:center — with overflow:auto it splits overflow across both
+     sides and the left half can never be scrolled to (zoomed page stuck on centre).
+     #canvasHolder centres itself with margin:0 auto, which is overflow-safe. */
+  justify-content:flex-start;
   padding:20px;
   -webkit-overflow-scrolling:touch;
 }
 #canvasHolder{
   position:relative;
+  flex:none;
+  margin:0 auto;
   box-shadow:var(--shadow-lg);
   background:#fff;
   height:fit-content;
@@ -2353,14 +2359,31 @@ redoBtn.addEventListener('click', doRedo);
 // ============================================================
 //  ZOOM
 // ============================================================
-function setZoom(newScale, announce) {
+function setZoom(newScale, announce, anchor) {
   newScale = Math.max(0.4, Math.min(4.0, newScale));
   if (Math.abs(newScale - scale) < 0.005) return;
+  // Remember which point of the page sits under the anchor (default: viewer centre)
+  // as a fraction of the page, so we can put the same point back under it after re-render.
+  let fx = 0.5, fy = 0.5, ax = 0, ay = 0, haveAnchor = false;
+  if (pdfDoc) {
+    const vr = viewerWrap.getBoundingClientRect(), hr = canvasHolder.getBoundingClientRect();
+    ax = anchor ? anchor.x : vr.left + vr.width / 2;
+    ay = anchor ? anchor.y : vr.top + vr.height / 2;
+    if (hr.width > 0 && hr.height > 0) {
+      fx = (ax - hr.left) / hr.width; fy = (ay - hr.top) / hr.height; haveAnchor = true;
+    }
+  }
   scale = newScale;
   const pct = Math.round((scale / BASE_SCALE) * 100);
   zoomPct.textContent = pct + '%';
   if (announce !== false) toast('Zoom ' + pct + '%');
-  if (pdfDoc) renderPage();
+  if (!pdfDoc) return;
+  return Promise.resolve(renderPage()).then(() => {
+    if (!haveAnchor) return;
+    const hr2 = canvasHolder.getBoundingClientRect();
+    viewerWrap.scrollLeft += (hr2.left + fx * hr2.width) - ax;
+    viewerWrap.scrollTop  += (hr2.top  + fy * hr2.height) - ay;
+  });
 }
 
 document.getElementById('zoomInBtn').addEventListener('click',    () => setZoom(scale * 1.25));
@@ -7108,10 +7131,12 @@ async function drawUserWatermarksOnAsync(c, pageNum) {
         const fsz = o.fontSize || 36;
         c.fillStyle = o.color || '#c62828';
         c.font = '700 ' + fsz + 'px ' + ((FONT_MAP[o.font] && FONT_MAP[o.font].css) || 'Helvetica, Arial, sans-serif');
-        c.textBaseline = 'middle';
+        // 'middle' sits ~0.12em higher than where the DOM preview puts the text, so
+        // use the alphabetic baseline at the same offset the preview/vector export use.
+        c.textBaseline = 'alphabetic';
         c.textAlign = o.align === 'left' ? 'left' : (o.align === 'right' ? 'right' : 'center');
         const tx = o.align === 'left' ? o.x : (o.align === 'right' ? o.x + o.w : o.x + o.w / 2);
-        c.fillText(o.text, tx, cy, o.w);
+        c.fillText(o.text, tx, cy + PdfCoords.MIDDLE_TO_BASELINE_EM * fsz);
       } else if (o.type === 'image' && o.src) {
         const img = await loadImageCached(o.src);
         c.drawImage(img, o.x, o.y, o.w, o.h);
@@ -7496,7 +7521,8 @@ async function performDownload(flatten) {
           const embImg = (mime === 'image/jpeg' || mime === 'image/jpg') ? await doc.embedJpg(imgBytes) : await doc.embedPng(imgBytes);
           const iw = obj.w * rxImg, ih = obj.h * ryImg;
           const ix = obj.x * rxImg, iy = height - obj.y * ryImg - ih;
-          page.drawImage(embImg, { x: ix, y: iy, width: iw, height: ih, opacity: obj.opacity, rotate: degrees(obj.rotation) });
+          const ia = PdfCoords.anchorForRotatedRect(ix, iy, iw, ih, obj.rotation || 0); // editor rotation is clockwise, pivot = centre
+          page.drawImage(embImg, { x: ia.x, y: ia.y, width: iw, height: ih, opacity: obj.opacity, rotate: degrees(ia.angle) });
         } catch (imgErr) { console.warn('Image embed failed:', imgErr); }
       }
 
@@ -7645,23 +7671,32 @@ async function performDownload(flatten) {
           const opacity = o.opacity != null ? o.opacity : 0.35;
           const rotateDeg = o.rotation || 0;
           if (o.type === 'text' && o.text) {
-            const wmFont = fonts[o.font] || fonts.Helvetica;
+            // The editor preview (.wm-text) and canvas path always render watermarks bold,
+            // so embed the bold counterpart of the chosen family to keep export == preview.
+            const wmLib = (FONT_MAP[o.font] && FONT_MAP[o.font].lib) || 'Helvetica';
+            const wmBold = { Helvetica: 'HelveticaBold', TimesRoman: 'TimesRomanBold' }[wmLib];
+            const wmFont = (wmBold && fonts[wmBold]) || fonts[o.font] || fonts.Helvetica;
             const fsz = (o.fontSize || 36) * ((rx + ry) / 2);
             const tc = hexToRgb(o.color || '#c62828');
-            const textWidth = wmFont.widthOfTextAtSize(o.text, fsz);
-            let tx = wx;
-            if (o.align === 'center') tx = wx + (ww - textWidth) / 2;
-            else if (o.align === 'right') tx = wx + ww - textWidth;
+            // pdf-lib's widthOfTextAtSize() includes kerning but drawText() does not apply it,
+            // so measure glyph-by-glyph (no kerning) to centre exactly what gets drawn.
+            const textWidth = Array.from(o.text).reduce((w, ch) => w + wmFont.widthOfTextAtSize(ch, fsz), 0);
+            // Same geometry as the editor preview / canvas path: rotate about the
+            // BOX centre, text aligned inside the box, clockwise-positive angle.
+            const wcx = wx + ww / 2, wcy = wy + wh / 2;
+            const leftOff = o.align === 'left' ? -ww / 2 : (o.align === 'right' ? ww / 2 - textWidth : -textWidth / 2);
+            const ta = PdfCoords.anchorForRotatedText(wcx, wcy, leftOff, PdfCoords.MIDDLE_TO_BASELINE_EM * fsz, rotateDeg);
             page.drawText(o.text, {
-              x: tx + ww/2, y: wy + wh/2, size: fsz, font: wmFont,
+              x: ta.x, y: ta.y, size: fsz, font: wmFont,
               color: rgb(tc.r/255, tc.g/255, tc.b/255), opacity,
-              rotate: degrees(rotateDeg),
+              rotate: degrees(ta.angle),
             });
           } else if (o.type === 'image' && o.src) {
             const base64 = o.src.split(',')[1];
             const wmImgBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
             const embImg = o.src.startsWith('data:image/png') ? await doc.embedPng(wmImgBytes) : await doc.embedJpg(wmImgBytes);
-            page.drawImage(embImg, { x: wx, y: wy, width: ww, height: wh, opacity, rotate: degrees(rotateDeg) });
+            const wa = PdfCoords.anchorForRotatedRect(wx, wy, ww, wh, rotateDeg);
+            page.drawImage(embImg, { x: wa.x, y: wa.y, width: ww, height: wh, opacity, rotate: degrees(wa.angle) });
           }
         } catch (wmErr) {
           console.warn('V1.2 Watermark: skipped a watermark that failed to export', o, wmErr);
@@ -9463,7 +9498,7 @@ function closeSearchMobile() {
 
 // ── Pinch-to-zoom on the PDF canvas ──────────────────────────
 (function setupPinchZoom() {
-  let pinching = false, startDist = 0, startScale = 1;
+  let pinching = false, startDist = 0, startScale = 1, pinchFocus = null;
 
   function dist(t0, t1) {
     return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
@@ -9475,6 +9510,10 @@ function closeSearchMobile() {
       startDist = dist(e.touches[0], e.touches[1]);
       startScale = scale;
       canvasHolder.style.transition = 'none';
+      // Focal point = midpoint between the fingers; live preview scales around it.
+      pinchFocus = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+      const hr = canvasHolder.getBoundingClientRect();
+      canvasHolder.style.transformOrigin = (pinchFocus.x - hr.left) + 'px ' + (pinchFocus.y - hr.top) + 'px';
     }
   }, { passive: true });
 
@@ -9495,13 +9534,15 @@ function closeSearchMobile() {
       : startScale;
     canvasHolder.style.transition = '';
     canvasHolder.style.transform = '';
-    await setZoom(endedScale, false);
+    canvasHolder.style.transformOrigin = '';
+    await setZoom(endedScale, false, pinchFocus);
   }, { passive: true });
 
   viewerWrap.addEventListener('touchcancel', () => {
     pinching = false;
     canvasHolder.style.transition = '';
     canvasHolder.style.transform = '';
+    canvasHolder.style.transformOrigin = '';
   }, { passive: true });
 })();
 
@@ -9518,5 +9559,6 @@ window.addEventListener('resize', () => {
 </script>
 <script src="android-bridge.js"></script>
 <script src="home.js"></script>
+<script src="viewport.js"></script>
 </body>
 </html>
